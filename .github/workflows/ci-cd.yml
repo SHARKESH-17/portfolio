@@ -1,0 +1,71 @@
+name: CI/CD Static Website
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: CI - Test Website
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check HTML files
+        run: |
+          echo "Checking HTML files..."
+          find . -name "*.html" -not -path "./.git/*"
+
+      - name: Check index.html
+        run: |
+          if [ -f "index.html" ]; then
+            echo "index.html found"
+          else
+            echo "ERROR: index.html not found"
+            exit 1
+          fi
+
+      - name: CI successful
+        run: echo "All CI checks passed!"
+
+  deploy:
+    name: CD - Deploy to GitHub Pages
+    needs: test
+
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload website
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
