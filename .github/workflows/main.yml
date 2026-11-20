@@ -1,0 +1,65 @@
+name: Portfolio CI/CD (AWS)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portfolio-aws-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  validate:
+    name: CI - Validate Portfolio
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Check index.html exists
+        run: |
+          test -f index.html || { echo "ERROR: index.html not found"; exit 1; }
+
+      - name: Validate HTML
+        run: npx --yes htmlhint "**/*.html" --ignore "node_modules/**"
+
+  deploy:
+    name: CD - Deploy to S3 and CloudFront
+    needs: validate
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Prepare site files
+        run: |
+          mkdir _site
+          rsync -a \
+            --exclude='.git' --exclude='.github' --exclude='_site' \
+            --exclude='node_modules' --exclude='README.md' \
+            ./ _site/
+
+      - name: Configure AWS credentials (OIDC, no stored keys)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Sync site to S3
+        run: aws s3 sync _site "s3://${{ secrets.S3_BUCKET }}" --delete
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}" \
+            --paths "/*"
